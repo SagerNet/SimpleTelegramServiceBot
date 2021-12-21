@@ -50,12 +50,21 @@ func (bot *Service) onNewMessage(message *tg.Message) {
 	{
 		// channel message check
 		if message.SenderChat != nil {
-			if message.SenderChat.ID == message.Chat.ID || message.SenderChat.ID == message.Chat.LinkedChatID {
+			chat, err := bot.GetChat(tg.ChatInfoConfig{
+				ChatConfig: tg.ChatConfig{
+					ChatID: message.Chat.ID,
+				},
+			})
+			if err != nil {
+				newError("failed to get chat").Base(err).WriteToLog()
+			}
+
+			if message.SenderChat.ID == message.Chat.ID || message.SenderChat.ID == chat.LinkedChatID {
 				// admin
 				return
 			}
 
-			err := bot.MustRequests(
+			err = bot.MustRequests(
 				tg.NewDeleteMessage(message.Chat.ID, message.MessageID),
 				tg.BanChatSenderChatConfig{
 					ChatID:       message.Chat.ID,
