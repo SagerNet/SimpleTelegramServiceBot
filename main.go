@@ -1,12 +1,15 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"flag"
 	"os"
+	"os/signal"
 	"time"
 
-	tg "github.com/go-telegram-bot-api/telegram-bot-api/v5"
+	"github.com/go-telegram/bot"
+	"github.com/go-telegram/bot/models"
 	"github.com/sagernet/sing-box/log"
 	"github.com/sagernet/sing/common"
 	E "github.com/sagernet/sing/common/exceptions"
@@ -18,70 +21,68 @@ func init() {
 	flag.StringVar(&configPath, "c", "config.json", "path to config file")
 }
 
+type Config struct {
+	BotToken string `json:"botToken"`
+}
+
 func main() {
 	flag.Parse()
 	configBytes, err := os.ReadFile(configPath)
 	common.Must(err)
 	config := &Config{}
 	common.Must(json.Unmarshal(configBytes, config))
-	bot, err := tg.NewBotAPI(config.BotToken)
-	common.Must(err)
-	service := &Service{config, bot}
-	service.loopUpdates()
-}
 
-type Config struct {
-	BotToken string `json:"botToken"`
-}
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer cancel()
 
-type Service struct {
-	*Config
-	*tg.BotAPI
-}
-
-func (bot *Service) loopUpdates() {
-	updates := bot.GetUpdatesChan(tg.UpdateConfig{AllowedUpdates: []string{"message"}})
-	for update := range updates {
-		go bot.onUpdate(update)
+	b, err := bot.New(config.BotToken, bot.WithDefaultHandler(handleUpdate))
+	if err != nil {
+		panic(err)
 	}
+
+	b.Start(ctx)
 }
 
-func (bot *Service) onUpdate(update tg.Update) {
+func handleUpdate(ctx context.Context, b *bot.Bot, update *models.Update) {
 	if update.Message != nil {
-		bot.onNewMessage(update.Message)
+		onNewMessage(ctx, b, update.Message)
 	}
 }
 
-func (bot *Service) onNewMessage(message *tg.Message) {
-	if !message.Chat.IsSuperGroup() {
+func onNewMessage(ctx context.Context, b *bot.Bot, message *models.Message) {
+	if message.Chat.Type != models.ChatTypeSupergroup {
 		return
 	}
 	{
 		// channel message check
 		if message.SenderChat != nil {
-			chat, err := bot.GetChat(tg.ChatInfoConfig{
-				ChatConfig: tg.ChatConfig{
-					ChatID: message.Chat.ID,
-				},
+			chat, err := b.GetChat(ctx, &bot.GetChatParams{
+				ChatID: message.Chat.ID,
 			})
 			if err != nil {
 				log.Error(E.Cause(err, "failed to get chat"))
-			}
-
-			if message.SenderChat.ID == message.Chat.ID || message.SenderChat.ID == chat.LinkedChatID {
-				// admin
 				return
 			}
 
-			err = bot.MustRequests(
-				tg.NewDeleteMessage(message.Chat.ID, message.MessageID),
-				tg.BanChatSenderChatConfig{
-					ChatID:       message.Chat.ID,
-					SenderChatID: message.SenderChat.ID,
-				},
-			)
+			if message.SenderChat.ID == message.Chat.ID || message.SenderChat.ID == chat.LinkedChatID {
+				return
+			}
+
+			_, err = b.DeleteMessage(ctx, &bot.DeleteMessageParams{
+				ChatID:    message.Chat.ID,
+				MessageID: message.ID,
+			})
+			if err != nil {
+				log.Error(E.Cause(err, "failed to delete channel messages from superchat"))
+			}
+
+			_, err = b.BanChatSenderChat(ctx, &bot.BanChatSenderChatParams{
+				ChatID:       message.Chat.ID,
+				SenderChatID: int(message.SenderChat.ID),
+			})
 			if err != nil {
 				log.Error(E.Cause(err, "failed to ban channel messages from superchat"))
+				return
 			}
 
 			return
@@ -89,50 +90,63 @@ func (bot *Service) onNewMessage(message *tg.Message) {
 	}
 	{
 		// member check
-		member, err := bot.GetChatMember(tg.GetChatMemberConfig{
-			ChatConfigWithUser: tg.ChatConfigWithUser{
-				ChatID: message.Chat.ID,
-				UserID: message.From.ID,
-			},
+		member, err := b.GetChatMember(ctx, &bot.GetChatMemberParams{
+			ChatID: message.Chat.ID,
+			UserID: message.From.ID,
 		})
 		if err != nil {
 			log.Error(E.Cause(err, "failed to get chat member"))
 			return
 		}
-		if member.Status == "left" {
-			send := tg.NewMessage(message.Chat.ID, "Join channel's chat group before leaving shitpost!")
-			send.ReplyToMessageID = message.MessageID
-
-			notice, err := bot.Send(send)
+		if member.Type == models.ChatMemberTypeLeft {
+			sentMessage, err := b.SendMessage(ctx, &bot.SendMessageParams{
+				ReplyParameters: &models.ReplyParameters{
+					ChatID:    message.Chat.ID,
+					MessageID: message.ID,
+				},
+			})
 			if err != nil {
 				log.Error(E.Cause(err, "failed to send reply to message"))
 				return
 			}
-			err = bot.MustRequests(
-				tg.NewDeleteMessage(message.Chat.ID, message.MessageID),
-				tg.RestrictChatMemberConfig{
-					ChatMemberConfig: tg.ChatMemberConfig{
-						ChatID: message.Chat.ID,
-						UserID: message.From.ID,
-					},
-					UntilDate: time.Now().Add(time.Minute).Unix(),
-				},
-			)
+			_, err = b.DeleteMessage(ctx, &bot.DeleteMessageParams{
+				ChatID:    message.Chat.ID,
+				MessageID: message.ID,
+			})
+			if err != nil {
+				log.Error(E.Cause(err, "failed to delete non-member message"))
+				return
+			}
+			_, err = b.RestrictChatMember(ctx, &bot.RestrictChatMemberParams{
+				ChatID:    message.Chat.ID,
+				UserID:    message.From.ID,
+				UntilDate: int(time.Now().Add(time.Minute).Unix()),
+			})
 			if err != nil {
 				log.Error(E.Cause(err, "failed to restrict chat member"))
 				return
 			}
 			time.AfterFunc(10*time.Second, func() {
-				bot.Request(tg.NewDeleteMessage(message.Chat.ID, notice.MessageID))
+				_, _ = b.DeleteMessage(ctx, &bot.DeleteMessageParams{
+					ChatID:    message.Chat.ID,
+					MessageID: sentMessage.ID,
+				})
 			})
 		}
 	}
 	{
 		// service messages check
 
-		if message.NewChatMembers != nil || len(message.NewChatTitle) > 0 || len(message.NewChatPhoto) > 0 || message.DeleteChatPhoto {
-
-			err := bot.MustRequest(tg.NewDeleteMessage(message.Chat.ID, message.MessageID))
+		if message.NewChatMembers != nil ||
+			len(message.NewChatTitle) > 0 ||
+			len(message.NewChatPhoto) > 0 ||
+			message.DeleteChatPhoto ||
+			message.PinnedMessage.Message != nil ||
+			message.BoostAdded != nil {
+			_, err := b.DeleteMessage(ctx, &bot.DeleteMessageParams{
+				ChatID:    message.Chat.ID,
+				MessageID: message.ID,
+			})
 			if err != nil {
 				log.Error(E.Cause(err, "failed to delete service message"))
 			}

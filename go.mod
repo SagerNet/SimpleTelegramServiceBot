@@ -3,7 +3,7 @@ module stsb
 go 1.20
 
 require (
-	github.com/go-telegram-bot-api/telegram-bot-api/v5 v5.5.1
+	github.com/go-telegram/bot v1.12.1
 	github.com/sagernet/sing v0.5.1
 	github.com/sagernet/sing-box v1.10.5
 )
