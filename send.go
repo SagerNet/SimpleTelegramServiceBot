@@ -1,6 +1,9 @@
 package main
 
-import tg "github.com/go-telegram-bot-api/telegram-bot-api/v5"
+import (
+	tg "github.com/go-telegram-bot-api/telegram-bot-api/v5"
+	E "github.com/sagernet/sing/common/exceptions"
+)
 
 func (bot *Service) MustRequest(request tg.Chattable) error {
 	response, err := bot.Request(request)
@@ -8,7 +11,7 @@ func (bot *Service) MustRequest(request tg.Chattable) error {
 		return err
 	}
 	if !response.Ok {
-		return newError("error ", response.ErrorCode, ": ", response.Description)
+		return E.New("error ", response.ErrorCode, ": ", response.Description)
 	}
 	return nil
 }

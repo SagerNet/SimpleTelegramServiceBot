@@ -1,17 +1,18 @@
 package main
 
-//go:generate go run github.com/v2fly/v2ray-core/v4/common/errors/errorgen
-
 import (
 	"encoding/json"
-	tg "github.com/go-telegram-bot-api/telegram-bot-api/v5"
-	"github.com/v2fly/v2ray-core/v4/common"
-	"io/ioutil"
+	"os"
 	"time"
+
+	tg "github.com/go-telegram-bot-api/telegram-bot-api/v5"
+	"github.com/sagernet/sing-box/log"
+	"github.com/sagernet/sing/common"
+	E "github.com/sagernet/sing/common/exceptions"
 )
 
 func main() {
-	configBytes, err := ioutil.ReadFile("config.json")
+	configBytes, err := os.ReadFile("config.json")
 	common.Must(err)
 	config := &Config{}
 	common.Must(json.Unmarshal(configBytes, config))
@@ -56,7 +57,7 @@ func (bot *Service) onNewMessage(message *tg.Message) {
 				},
 			})
 			if err != nil {
-				newError("failed to get chat").Base(err).WriteToLog()
+				log.Error(E.Cause(err, "failed to get chat"))
 			}
 
 			if message.SenderChat.ID == message.Chat.ID || message.SenderChat.ID == chat.LinkedChatID {
@@ -72,7 +73,7 @@ func (bot *Service) onNewMessage(message *tg.Message) {
 				},
 			)
 			if err != nil {
-				newError("failed to ban channel messages from superchat").Base(err).WriteToLog()
+				log.Error(E.Cause(err, "failed to ban channel messages from superchat"))
 			}
 
 			return
@@ -87,7 +88,7 @@ func (bot *Service) onNewMessage(message *tg.Message) {
 			},
 		})
 		if err != nil {
-			newError("failed to get chat member").Base(err).WriteToLog()
+			log.Error(E.Cause(err, "failed to get chat member"))
 			return
 		}
 		if member.Status == "left" {
@@ -96,7 +97,7 @@ func (bot *Service) onNewMessage(message *tg.Message) {
 
 			notice, err := bot.Send(send)
 			if err != nil {
-				newError("failed to send reply to message").Base(err).WriteToLog()
+				log.Error(E.Cause(err, "failed to send reply to message"))
 				return
 			}
 			err = bot.MustRequests(
@@ -110,7 +111,7 @@ func (bot *Service) onNewMessage(message *tg.Message) {
 				},
 			)
 			if err != nil {
-				newError("failed to ban messages from non-member").Base(err).WriteToLog()
+				log.Error(E.Cause(err, "failed to restrict chat member"))
 				return
 			}
 			time.AfterFunc(10*time.Second, func() {
@@ -125,7 +126,7 @@ func (bot *Service) onNewMessage(message *tg.Message) {
 
 			err := bot.MustRequest(tg.NewDeleteMessage(message.Chat.ID, message.MessageID))
 			if err != nil {
-				newError("failed to delete service message").Base(err).WriteToLog()
+				log.Error(E.Cause(err, "failed to delete service message"))
 			}
 		}
 	}
