@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"flag"
 	"os"
 	"time"
 
@@ -11,8 +12,15 @@ import (
 	E "github.com/sagernet/sing/common/exceptions"
 )
 
+var configPath string
+
+func init() {
+	flag.StringVar(&configPath, "c", "config.json", "path to config file")
+}
+
 func main() {
-	configBytes, err := os.ReadFile("config.json")
+	flag.Parse()
+	configBytes, err := os.ReadFile(configPath)
 	common.Must(err)
 	config := &Config{}
 	common.Must(json.Unmarshal(configBytes, config))

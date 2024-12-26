@@ -1,0 +1,13 @@
+[Unit]
+Description=simple telegram service bot
+After=network.target nss-lookup.target network-online.target
+
+[Service]
+ExecStart=/usr/local/bin/stsb -c /usr/local/etc/stsb/config.json
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=on-failure
+RestartSec=10s
+LimitNOFILE=infinity
+
+[Install]
+WantedBy=multi-user.target

@@ -1,4 +1,4 @@
-module simpleTelegramService
+module stsb
 
 go 1.20
 
